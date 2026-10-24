@@ -160,7 +160,7 @@ public final class TerminalEmulator {
      *     {@link #mTerminalControlArgs}, and for later code points {@link #receiveApc(int)} is called
      *     instead.
      * <p>
-     * Currently, APC commands are only parsed, but ignored as none are supported.
+     * Only the kitty graphics `APC G` commands are supported, see {@link KittyGraphics}.
      * <p>
      * - https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Application-Program-Command-functions
      */
@@ -351,6 +351,9 @@ public final class TerminalEmulator {
     /** The {@link ITermImage} if an iTerm image command is being processed. */
     private ITermImage mITermImage;
 
+    /** The kitty graphics protocol images. */
+    private final KittyGraphics mKittyGraphics = new KittyGraphics();
+
 
 
     /**
@@ -513,6 +516,10 @@ public final class TerminalEmulator {
     }
 
 
+
+    public KittyGraphics getKittyGraphics() {
+        return mKittyGraphics;
+    }
 
     public TerminalBuffer getScreen() {
         return mScreen;
@@ -2607,8 +2614,7 @@ public final class TerminalEmulator {
     private void receiveApcEsc(final int b) {
         switch (b) {
             case '\\':
-                //doApc();
-                //clearApcTypeVariables();
+                doApc();
                 break;
             default:
                 // The ESC character was not followed by a \, so insert the ESC and
@@ -2628,7 +2634,13 @@ public final class TerminalEmulator {
     /**
      * Do {@link #ESC_APC}. Check its docs for more info.
      */
-    private void doApc() {}
+    private void doApc() {
+        if (mTerminalControlArgs.length() == 0 || mTerminalControlArgs.charAt(0) != 'G') return;
+        String response = mKittyGraphics.handle(mTerminalControlArgs.toString());
+        // Free image data from memory held in apc command arguments as it is no longer needed.
+        clearTerminalControlArgs();
+        if (response != null) mSession.write(response);
+    }
 
 
 
@@ -3517,6 +3529,7 @@ public final class TerminalEmulator {
         clearTerminalControlArgs();
         clearOscTypeVariables();
         mITermImage = null;
+        mKittyGraphics.clear();
     }
 
     public String getSelectedText(int x1, int y1, int x2, int y2) {

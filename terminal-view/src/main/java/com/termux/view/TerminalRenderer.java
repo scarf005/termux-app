@@ -9,6 +9,7 @@ import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.os.Build;
 
+import com.termux.terminal.KittyGraphics;
 import com.termux.terminal.TerminalBuffer;
 import com.termux.terminal.TerminalEmulator;
 import com.termux.terminal.TerminalRow;
@@ -25,6 +26,7 @@ public final class TerminalRenderer {
     final int mTextSize;
     final Typeface mTypeface;
     private final Paint mTextPaint = new Paint();
+    private final Paint mBitmapPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
 
     /** The width of a single mono spaced character obtained by {@link Paint#measureText(String)} on a single 'X'. */
     final float mFontWidth;
@@ -97,6 +99,9 @@ public final class TerminalRenderer {
             int currentCharIndex = 0;
             float measuredWidthForRun = 0.f;
             boolean lastRunGraphic = false;
+            // The last kitty placeholder in this row, from which a placeholder without diacritics continues.
+            int lastPlaceholderColumn = -2, lastImageRow = 0, lastImageColumn = 0, lastIdMsb = 0;
+            long lastPlaceholderStyle = 0;
 
             for (int column = 0; column < columns; ) {
                 final char charAtIndex = line[currentCharIndex];
@@ -104,7 +109,7 @@ public final class TerminalRenderer {
                 final int charsForCodePoint = charIsHighsurrogate ? 2 : 1;
                 final int codePoint = charIsHighsurrogate ? Character.toCodePoint(charAtIndex, line[currentCharIndex + 1]) : charAtIndex;
                 final long style = lineObject.getStyle(column);
-                final boolean graphic = TextStyle.isTerminalBitmap(style);
+                final boolean graphic = TextStyle.isTerminalBitmap(style) || codePoint == KittyGraphics.PLACEHOLDER;
                 final int codePointWcWidth = WcWidth.width(codePoint);
                 final boolean insideCursor = (cursorX == column || (codePointWcWidth == 2 && cursorX == column + 1));
                 final boolean insideSelection = column >= selx1 && column <= selx2;
@@ -146,11 +151,32 @@ public final class TerminalRenderer {
                     final float left = column * mFontWidth;
                     final float top = heightOffset - mFontLineSpacing;
                     currentCharIndex += charsForCodePoint;
-                    Bitmap bitmap = mEmulator.getScreen().getSixelBitmap(style);
-                    if (bitmap != null) {
-                        Rect bitmapSrcRect = mEmulator.getScreen().getSixelRect(style);
-                        RectF bitmapDestRect = new RectF(left, top, left + mFontWidth, top + mFontLineSpacing);
-                        canvas.drawBitmap(bitmap, bitmapSrcRect, bitmapDestRect, null);
+                    if (TextStyle.isTerminalBitmap(style)) {
+                        Bitmap bitmap = mEmulator.getScreen().getSixelBitmap(style);
+                        if (bitmap != null) {
+                            Rect bitmapSrcRect = mEmulator.getScreen().getSixelRect(style);
+                            RectF bitmapDestRect = new RectF(left, top, left + mFontWidth, top + mFontLineSpacing);
+                            canvas.drawBitmap(bitmap, bitmapSrcRect, bitmapDestRect, null);
+                        }
+                    } else {
+                        // The row, column and most significant id byte diacritics, `-1` if missing.
+                        final int[] values = {-1, -1, -1};
+                        for (int i = 0; currentCharIndex < charsUsedInLine && WcWidth.width(line, currentCharIndex) <= 0; i++) {
+                            final int diacritic = Character.codePointAt(line, currentCharIndex);
+                            if (i < values.length) values[i] = KittyGraphics.diacriticIndex(diacritic);
+                            currentCharIndex += Character.charCount(diacritic);
+                        }
+                        final boolean continues = lastPlaceholderColumn == column - 1 && lastPlaceholderStyle == style;
+                        final int imageRow = values[0] >= 0 ? values[0] : continues ? lastImageRow : 0;
+                        final int imageColumn = values[1] >= 0 ? values[1] : continues && imageRow == lastImageRow ? lastImageColumn + 1 : 0;
+                        final int idMsb = values[2] >= 0 ? values[2] : continues && imageRow == lastImageRow && imageColumn == lastImageColumn + 1 ? lastIdMsb : 0;
+                        drawKittyPlaceholder(canvas, mEmulator.getKittyGraphics().getImage(KittyGraphics.imageId(style, idMsb)),
+                            imageRow, imageColumn, left, top);
+                        lastPlaceholderColumn = column;
+                        lastPlaceholderStyle = style;
+                        lastImageRow = imageRow;
+                        lastImageColumn = imageColumn;
+                        lastIdMsb = idMsb;
                     }
                     column += 1;
                     measuredWidthForRun = 0.f;
@@ -179,6 +205,29 @@ public final class TerminalRenderer {
             drawTextRun(canvas, line, palette, heightOffset, lastRunStartColumn, columnWidthSinceLastRun, lastRunStartIndex, charsSinceLastRun,
                 measuredWidthForRun, cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection);
         }
+    }
+
+    /**
+     * Draw the cell at the image row and column of a kitty graphics image placed with Unicode
+     * placeholders. The image is scaled to fit its placement keeping its aspect ratio, and centered.
+     */
+    private void drawKittyPlaceholder(Canvas canvas, KittyGraphics.Image image, int imageRow, int imageColumn, float left, float top) {
+        if (image == null || !image.isPlaced()) return;
+        final Bitmap bitmap = image.getBitmap();
+        if (bitmap == null) return;
+        final int bitmapWidth = bitmap.getWidth(), bitmapHeight = bitmap.getHeight();
+        final int placementColumns = image.getColumns() > 0 ? image.getColumns() : (int) Math.ceil(bitmapWidth / mFontWidth);
+        final int placementRows = image.getRows() > 0 ? image.getRows() : (bitmapHeight + mFontLineSpacing - 1) / mFontLineSpacing;
+        final float boxWidth = placementColumns * mFontWidth, boxHeight = placementRows * mFontLineSpacing;
+        final float scale = Math.min(boxWidth / bitmapWidth, boxHeight / bitmapHeight);
+        final float imageLeft = left - imageColumn * mFontWidth + (boxWidth - bitmapWidth * scale) / 2;
+        final float imageTop = top - imageRow * mFontLineSpacing + (boxHeight - bitmapHeight * scale) / 2;
+        final RectF cell = new RectF(left, top, left + mFontWidth, top + mFontLineSpacing);
+        if (!cell.intersect(imageLeft, imageTop, imageLeft + bitmapWidth * scale, imageTop + bitmapHeight * scale)) return;
+        final Rect source = new Rect(
+            (int) ((cell.left - imageLeft) / scale), (int) ((cell.top - imageTop) / scale),
+            (int) Math.ceil((cell.right - imageLeft) / scale), (int) Math.ceil((cell.bottom - imageTop) / scale));
+        canvas.drawBitmap(bitmap, source, cell, mBitmapPaint);
     }
 
     private void drawTextRun(Canvas canvas, char[] text, int[] palette, float y, int startColumn, int runWidthColumns,
