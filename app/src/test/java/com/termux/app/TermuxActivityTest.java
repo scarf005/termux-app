@@ -29,4 +29,12 @@ public class TermuxActivityTest {
             "https://example.com/#bar", "https://example.com/foo#bar");
     }
 
+    @Test
+    public void testExtractUrlsInParentheses() {
+        // How Claude Code shows a markdown link in a terminal without hyperlinks.
+        assertUrlsAre("docs (https://example.com/a)", "https://example.com/a");
+        assertUrlsAre("(https://example.com/a).", "https://example.com/a");
+        assertUrlsAre("(https://en.wikipedia.org/wiki/Fork_(software))", "https://en.wikipedia.org/wiki/Fork_(software)");
+    }
+
 }
