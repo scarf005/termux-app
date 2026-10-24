@@ -99,6 +99,11 @@ public final class TermuxPropertyConstants {
 
     /* boolean */
 
+    /** Defines the key for whether the soft keyboard may compose text, like Korean, Japanese and Chinese, which is drawn at the cursor until it is committed */
+    public static final String KEY_ALLOW_IME_COMPOSITION =  "allow-ime-composition"; // Default: "allow-ime-composition"
+
+
+
     /** Defines the key for whether file share receiver of the app is enabled. */
     public static final String KEY_DISABLE_FILE_SHARE_RECEIVER =  "disable-file-share-receiver"; // Default: "disable-file-share-receiver"
 
@@ -391,6 +396,7 @@ public final class TermuxPropertyConstants {
      * */
     public static final Set<String> TERMUX_APP_PROPERTIES_LIST = new HashSet<>(Arrays.asList(
         /* boolean */
+        KEY_ALLOW_IME_COMPOSITION,
         KEY_DISABLE_FILE_SHARE_RECEIVER,
         KEY_DISABLE_FILE_VIEW_RECEIVER,
         KEY_DISABLE_HARDWARE_KEYBOARD_SHORTCUTS,
@@ -439,6 +445,7 @@ public final class TermuxPropertyConstants {
      * default: false
      */
     public static final Set<String> TERMUX_DEFAULT_FALSE_BOOLEAN_BEHAVIOUR_PROPERTIES_LIST = new HashSet<>(Arrays.asList(
+        KEY_ALLOW_IME_COMPOSITION,
         KEY_DISABLE_FILE_SHARE_RECEIVER,
         KEY_DISABLE_FILE_VIEW_RECEIVER,
         KEY_DISABLE_HARDWARE_KEYBOARD_SHORTCUTS,

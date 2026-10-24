@@ -213,6 +213,11 @@ public class TermuxTerminalViewClient extends TermuxTerminalViewClientBase {
     }
 
     @Override
+    public boolean shouldAllowImeComposition() {
+        return mActivity.getProperties().isAllowingImeComposition();
+    }
+
+    @Override
     public boolean shouldEnforceCharBasedInput() {
         return mActivity.getProperties().isEnforcingCharBasedInput();
     }

@@ -578,6 +578,10 @@ public abstract class TermuxSharedProperties {
         return (boolean) getInternalPropertyValue(TermuxConstants.PROP_ALLOW_EXTERNAL_APPS, true);
     }
 
+    public boolean isAllowingImeComposition() {
+        return (boolean) getInternalPropertyValue(TermuxPropertyConstants.KEY_ALLOW_IME_COMPOSITION, true);
+    }
+
     public boolean isFileShareReceiverDisabled() {
         return (boolean) getInternalPropertyValue(TermuxPropertyConstants.KEY_DISABLE_FILE_SHARE_RECEIVER, true);
     }

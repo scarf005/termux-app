@@ -25,6 +25,10 @@ public class TermuxTerminalViewClientBase implements TerminalViewClient {
         return false;
     }
 
+    public boolean shouldAllowImeComposition() {
+        return false;
+    }
+
     public boolean shouldEnforceCharBasedInput() {
         return false;
     }

@@ -351,6 +351,22 @@ public final class TerminalRenderer {
         if (savedMatrix) canvas.restore();
     }
 
+    /** Draw the text an input method is composing underlined over the cells from the cursor. */
+    public final void renderComposingText(TerminalEmulator emulator, Canvas canvas, int topRow, String text) {
+        int columns = 0;
+        for (int i = 0; i < text.length(); i += Character.charCount(text.codePointAt(i)))
+            columns += Math.max(0, WcWidth.width(text.codePointAt(i)));
+        final int startColumn = Math.max(0, Math.min(emulator.getCursorCol(), emulator.mColumns - columns));
+        final float y = mFontLineSpacingAndAscent + (emulator.getCursorRow() - topRow + 1) * mFontLineSpacing;
+        final int[] palette = emulator.mColors.mCurrentColors;
+        final char[] chars = text.toCharArray();
+
+        mTextPaint.setColor(palette[TextStyle.COLOR_INDEX_BACKGROUND]);
+        canvas.drawRect(startColumn * mFontWidth, y - mFontLineSpacing, (startColumn + columns) * mFontWidth, y, mTextPaint);
+        drawTextRun(canvas, chars, palette, y, startColumn, columns, 0, chars.length, mTextPaint.measureText(chars, 0, chars.length),
+            0, 0, TextStyle.encode(TextStyle.COLOR_INDEX_FOREGROUND, TextStyle.COLOR_INDEX_BACKGROUND, TextStyle.CHARACTER_ATTRIBUTE_UNDERLINE), false);
+    }
+
     public float getFontWidth() {
         return mFontWidth;
     }

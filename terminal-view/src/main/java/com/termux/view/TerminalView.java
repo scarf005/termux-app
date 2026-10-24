@@ -69,6 +69,8 @@ public final class TerminalView extends View {
     /** The top row of text to display. Ranges from -activeTranscriptRows to 0. */
     int mTopRow;
     int[] mDefaultSelectors = new int[]{-1,-1,-1,-1};
+    /** The text the input method is composing, which is not sent to the terminal yet. */
+    String mComposingText = "";
 
     float mScaleFactor = 1.f;
     final GestureAndScaleRecognizer mGestureRecognizer;
@@ -313,7 +315,11 @@ public final class TerminalView extends View {
         // initially started with the alternate view or if activity is returned to from another app
         // and the alternate view was the one selected the last time.
         if (mClient.isTerminalViewSelected()) {
-            if (mClient.shouldEnforceCharBasedInput()) {
+            if (mClient.shouldAllowImeComposition()) {
+                // Keyboards like Gboard only show layouts that compose text, like Korean, for a text class without the
+                // password variation. The text being composed is drawn at the cursor until it is committed.
+                outAttrs.inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
+            } else if (mClient.shouldEnforceCharBasedInput()) {
                 // Some keyboards seems do not reset the internal state on TYPE_NULL.
                 // Affects mostly Samsung stock keyboards.
                 // https://github.com/termux/termux-app/issues/686
@@ -344,13 +350,30 @@ public final class TerminalView extends View {
         return new BaseInputConnection(this, true) {
 
             @Override
+            public boolean setComposingText(CharSequence text, int newCursorPosition) {
+                if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) {
+                    mClient.logInfo(LOG_TAG, "IME: setComposingText(\"" + text + "\", " + newCursorPosition + ")");
+                }
+                super.setComposingText(text, newCursorPosition);
+                showComposingText();
+                return true;
+            }
+
+            @Override
             public boolean finishComposingText() {
                 if (TERMINAL_VIEW_KEY_LOGGING_ENABLED) mClient.logInfo(LOG_TAG, "IME: finishComposingText()");
                 super.finishComposingText();
 
                 sendTextToTerminal(getEditable());
                 getEditable().clear();
+                showComposingText();
                 return true;
+            }
+
+            /** The editable only holds the text being composed, as committed text is sent and cleared. */
+            void showComposingText() {
+                mComposingText = getEditable().toString();
+                invalidate();
             }
 
             @Override
@@ -365,6 +388,7 @@ public final class TerminalView extends View {
                 Editable content = getEditable();
                 sendTextToTerminal(content);
                 content.clear();
+                showComposingText();
                 return true;
             }
 
@@ -1036,6 +1060,7 @@ public final class TerminalView extends View {
             }
 
             mRenderer.render(mEmulator, canvas, mTopRow, sel[0], sel[1], sel[2], sel[3]);
+            if (!mComposingText.isEmpty()) mRenderer.renderComposingText(mEmulator, canvas, mTopRow, mComposingText);
 
             // render the text selection handles
             renderTextSelection();
