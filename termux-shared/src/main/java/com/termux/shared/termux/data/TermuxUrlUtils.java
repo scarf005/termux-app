@@ -95,10 +95,30 @@ public class TermuxUrlUtils {
             int matchStart = matcher.start(1);
             int matchEnd = matcher.end();
             String url = text.substring(matchStart, matchEnd);
-            urlSet.add(url);
+            urlSet.add(trimUrlEnd(url));
         }
 
         return urlSet;
+    }
+
+    /** Leave out punctuation ending a sentence and a closing parenthesis without its opening one in the url. */
+    private static String trimUrlEnd(String url) {
+        int end = url.length();
+        while (end > 0) {
+            char c = url.charAt(end - 1);
+            if (c == ')') {
+                int depth = 0;
+                for (int i = 0; i < end; i++) {
+                    if (url.charAt(i) == '(') depth++;
+                    else if (url.charAt(i) == ')') depth--;
+                }
+                if (depth >= 0) break;
+            } else if (".,;:!?'".indexOf(c) < 0) {
+                break;
+            }
+            end--;
+        }
+        return url.substring(0, end);
     }
 
 }
