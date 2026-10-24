@@ -75,6 +75,7 @@ public final class TerminalRenderer {
         if (reverseVideo)
             canvas.drawColor(palette[TextStyle.COLOR_INDEX_FOREGROUND], PorterDuff.Mode.SRC);
 
+        drawKittyPlacements(mEmulator, canvas, topRow, true);
         float heightOffset = mFontLineSpacingAndAscent;
         for (int row = topRow; row < endRow; row++) {
             heightOffset += mFontLineSpacing;
@@ -204,6 +205,39 @@ public final class TerminalRenderer {
             }
             drawTextRun(canvas, line, palette, heightOffset, lastRunStartColumn, columnWidthSinceLastRun, lastRunStartIndex, charsSinceLastRun,
                 measuredWidthForRun, cursorColor, cursorShape, lastRunStyle, reverseVideo || invertCursorTextColor || lastRunInsideSelection);
+        }
+        drawKittyPlacements(mEmulator, canvas, topRow, false);
+    }
+
+    /** Draw the kitty graphics placements of the current screen buffer that are under or over the text. */
+    private void drawKittyPlacements(TerminalEmulator emulator, Canvas canvas, int topRow, boolean underText) {
+        final TerminalBuffer screen = emulator.getScreen();
+        // Images at their pixel size keep their size in cells, even if the cell size reported to programs is rounded.
+        final float scaleX = mFontWidth / Math.max(1, emulator.getCellWidthPixels());
+        final float scaleY = (float) mFontLineSpacing / Math.max(1, emulator.getCellHeightPixels());
+        for (KittyGraphics.Placement placement : emulator.getKittyGraphics().getPlacements()) {
+            if (placement.buffer != screen || (placement.z < 0) != underText) continue;
+            final long row = placement.row - screen.getScrollCounter() - topRow;
+            if (row + placement.rows <= 0 || row >= emulator.mRows) continue;
+            final KittyGraphics.Image image = emulator.getKittyGraphics().getImage(placement.imageId);
+            final Bitmap bitmap = image == null ? null : image.getBitmap();
+            if (bitmap == null) continue;
+            float left = placement.column * mFontWidth + placement.offsetX * scaleX;
+            // Rows start at the same offset as in render().
+            float top = mFontLineSpacingAndAscent + row * mFontLineSpacing + placement.offsetY * scaleY;
+            float width = placement.sourceWidth * scaleX, height = placement.sourceHeight * scaleY;
+            if (placement.scaled) {
+                // The image is fitted in its cells keeping its aspect ratio, and centered.
+                final float boxWidth = placement.columns * mFontWidth, boxHeight = placement.rows * mFontLineSpacing;
+                final float scale = Math.min(boxWidth / placement.sourceWidth, boxHeight / placement.sourceHeight);
+                width = placement.sourceWidth * scale;
+                height = placement.sourceHeight * scale;
+                left += (boxWidth - width) / 2;
+                top += (boxHeight - height) / 2;
+            }
+            canvas.drawBitmap(bitmap,
+                new Rect(placement.sourceX, placement.sourceY, placement.sourceX + placement.sourceWidth, placement.sourceY + placement.sourceHeight),
+                new RectF(left, top, left + width, top + height), mBitmapPaint);
         }
     }
 

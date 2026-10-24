@@ -65,8 +65,95 @@ public class KittyGraphicsTest extends TerminalTestCase {
         assertEnteringStringGivesResponse(apc("a=p,U=1,i=8,c=2,r=1"), "\033_Gi=8;OK\033\\");
         assertTrue(mTerminal.getKittyGraphics().getImage(8).isPlaced());
         assertEnteringStringGivesResponse(apc("a=p,U=1,i=9"), "\033_Gi=9;ENOENT:no image with this id\033\\");
-        // Direct placements are not supported, so clients can fall back to another protocol.
-        assertEnteringStringGivesResponse(apc("a=p,i=8"), "\033_Gi=8;EINVAL:only Unicode placeholder placements (U=1) are supported\033\\");
+    }
+
+    /** An RGB image of 2x2 cells of {@link #INITIAL_CELL_WIDTH_PIXELS} x {@link #INITIAL_CELL_HEIGHT_PIXELS}. */
+    private static String transmitTwoByTwoCells(int id) {
+        int bytes = 2 * INITIAL_CELL_WIDTH_PIXELS * 2 * INITIAL_CELL_HEIGHT_PIXELS * 3;
+        return apc("a=t,q=2,f=24,s=" + 2 * INITIAL_CELL_WIDTH_PIXELS + ",v=" + 2 * INITIAL_CELL_HEIGHT_PIXELS + ",i=" + id + ";" +
+            new String(new char[bytes / 3 * 4]).replace('\0', 'A'));
+    }
+
+    private KittyGraphics.Placement onlyPlacement() {
+        assertEquals(1, mTerminal.getKittyGraphics().getPlacements().size());
+        return mTerminal.getKittyGraphics().getPlacements().get(0);
+    }
+
+    public void testDirectPlacementAtCursorMovesCursorAfterIt() {
+        withTerminalSized(6, 4).enterString(transmitTwoByTwoCells(1)).enterString("\033[2;2H");
+        assertEnteringStringGivesResponse(apc("a=p,i=1"), "\033_Gi=1;OK\033\\");
+        KittyGraphics.Placement placement = onlyPlacement();
+        assertEquals(1, placement.row);
+        assertEquals(1, placement.column);
+        assertEquals(2, placement.columns);
+        assertEquals(2, placement.rows);
+        assertFalse(placement.scaled);
+        // Like kitty: to the column after the image, on its last row.
+        assertCursorAt(2, 3);
+        assertLinesAre("      ", "      ", "      ", "      ");
+    }
+
+    public void testDirectPlacementLikeZellij() {
+        withTerminalSized(6, 4).enterString(transmitTwoByTwoCells(1)).enterString("\033[3;4H");
+        // What zellij writes to draw a piece of an image in a pane, without moving the cursor.
+        enterString(apc("a=p,q=2,i=1,p=7,x=13,y=0,w=13,h=30,X=2,Y=3,z=0,C=1"));
+        KittyGraphics.Placement placement = onlyPlacement();
+        assertEquals(7, placement.placementId);
+        assertEquals(13, placement.sourceX);
+        assertEquals(13, placement.sourceWidth);
+        assertEquals(30, placement.sourceHeight);
+        assertEquals(2, placement.offsetX);
+        assertEquals(3, placement.offsetY);
+        assertEquals(2, placement.columns);
+        assertEquals(3, placement.rows);
+        assertCursorAt(2, 3);
+
+        // Placing the same placement id again moves it.
+        enterString("\033[1;1H").enterString(apc("a=p,q=2,i=1,p=7,C=1"));
+        assertEquals(0, onlyPlacement().row);
+        enterString(apc("a=p,q=2,i=1,p=8,C=1"));
+        assertEquals(2, mTerminal.getKittyGraphics().getPlacements().size());
+        enterString(apc("a=d,q=2,d=i,i=1,p=7"));
+        assertEquals(8, onlyPlacement().placementId);
+        assertNotNull(mTerminal.getKittyGraphics().getImage(1));
+    }
+
+    public void testDirectPlacementScaledToColumns() {
+        withTerminalSized(6, 4).enterString(transmitTwoByTwoCells(1));
+        enterString(apc("a=p,q=2,i=1,c=4,C=1"));
+        KittyGraphics.Placement placement = onlyPlacement();
+        assertTrue(placement.scaled);
+        assertEquals(4, placement.columns);
+        assertEquals(4, placement.rows);
+        assertEnteringStringGivesResponse(apc("a=p,i=1,x=26"), "\033_Gi=1;EINVAL:nothing of the image to display\033\\");
+    }
+
+    public void testDirectPlacementScrollsWithText() {
+        withTerminalSized(6, 3).enterString(transmitTwoByTwoCells(1)).enterString("\033[2;1H");
+        enterString(apc("a=p,q=2,i=1,C=1"));
+        enterString("\033[3;1H\n\n");
+        TerminalBuffer screen = mTerminal.getScreen();
+        assertEquals(-1, onlyPlacement().row - screen.getScrollCounter());
+    }
+
+    public void testClearingTheScreenRemovesPlacements() {
+        withTerminalSized(6, 4).enterString(transmitTwoByTwoCells(1));
+        enterString(apc("a=p,q=2,i=1,C=1"));
+        // The alternate screen starts without the placements of the main screen.
+        enterString("\033[?1049h").enterString(apc("a=p,q=2,i=1,C=1"));
+        assertEquals(2, mTerminal.getKittyGraphics().getPlacements().size());
+        enterString("\033[2J");
+        assertEquals(1, mTerminal.getKittyGraphics().getPlacements().size());
+        enterString("\033[?1049l\033[?1049h");
+        assertEquals(1, mTerminal.getKittyGraphics().getPlacements().size());
+        enterString("\033[?1049l\033[2J");
+        assertEquals(0, mTerminal.getKittyGraphics().getPlacements().size());
+    }
+
+    public void testUndecodableImageIsNotPlaced() {
+        withTerminalSized(6, 4);
+        enterString(apc("a=t,q=2,f=100,i=2;iVBORw0KGgo="));
+        assertEnteringStringGivesResponse(apc("a=p,i=2"), "\033_Gi=2;EINVAL:nothing of the image to display\033\\");
     }
 
     public void testDeleteAndReset() {

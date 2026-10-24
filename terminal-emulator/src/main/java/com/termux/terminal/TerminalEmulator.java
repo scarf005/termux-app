@@ -352,7 +352,7 @@ public final class TerminalEmulator {
     private ITermImage mITermImage;
 
     /** The kitty graphics protocol images. */
-    private final KittyGraphics mKittyGraphics = new KittyGraphics();
+    private final KittyGraphics mKittyGraphics = new KittyGraphics(this);
 
 
 
@@ -1878,8 +1878,10 @@ public final class TerminalEmulator {
                     // Check if buffer size needs to be updated:
                     if (resized) resizeScreen();
                     // Clear new screen if alt buffer:
-                    if (newScreen == mAltBuffer)
+                    if (newScreen == mAltBuffer) {
                         newScreen.blockSet(0, 0, mColumns, mRows, ' ', getStyle());
+                        mKittyGraphics.clearPlacements(newScreen);
+                    }
                 }
                 break;
             }
@@ -1977,6 +1979,12 @@ public final class TerminalEmulator {
         mArgIndex = 0;
         Arrays.fill(mArgs, -1);
         mArgsSubParamsBitSet = 0;
+    }
+
+    /** Move the cursor after an image placed at it, to the column after it on its last row. */
+    void moveCursorAfterImage(int columns, int rows) {
+        for (int i = 1; i < rows; i++) doLinefeed();
+        setCursorCol(Math.min(mCursorCol + columns, mColumns - 1));
     }
 
     private void doLinefeed() {
@@ -2208,6 +2216,7 @@ public final class TerminalEmulator {
                     case 2: // Erase all of the display - all lines are erased, changed to single-width, and the cursor does not
                         // move..
                         blockClear(0, 0, mColumns, mRows);
+                        mKittyGraphics.clearPlacements(mScreen);
                         break;
                     case 3: // Delete all lines saved in the scrollback buffer (xterm etc)
                         mMainBuffer.clearTranscript();

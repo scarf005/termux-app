@@ -4,22 +4,25 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.util.Base64;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 /**
- * The kitty graphics protocol `APC G ... ST` images, displayed through Unicode placeholders.
+ * The kitty graphics protocol `APC G ... ST` images.
  *
  * Images are transmitted directly (`t=d`) as PNG (`f=100`), RGB (`f=24`) or RGBA (`f=32`) data,
- * optionally in chunks (`m=1`). Only virtual placements (`U=1`) are supported: the application
- * writes {@link #PLACEHOLDER} cells whose foreground color holds the image id and whose
- * combining diacritics hold the row and column of the image cell, so the image moves with the
- * text like any other character.
+ * optionally in chunks (`m=1`), and displayed in one of two ways:
+ * - A {@link Placement} at the cursor, drawn over the text and scrolled with it.
+ * - A virtual placement (`U=1`): the application writes {@link #PLACEHOLDER} cells whose
+ *   foreground color holds the image id and whose combining diacritics hold the row and column
+ *   of the image cell, so the image moves with the text like any other character.
  *
- * - https://sw.kovidgoyal.net/kitty/graphics-protocol/#unicode-placeholders
+ * - https://sw.kovidgoyal.net/kitty/graphics-protocol/
  */
 public final class KittyGraphics {
 
@@ -118,6 +121,19 @@ public final class KittyGraphics {
             return placed;
         }
 
+        /** The image width in pixels, `0` if it is not decodable. */
+        int getWidth() {
+            if (format != FORMAT_PNG) return width;
+            Bitmap bitmap = getBitmap();
+            return bitmap != null ? bitmap.getWidth() : 0;
+        }
+
+        int getHeight() {
+            if (format != FORMAT_PNG) return height;
+            Bitmap bitmap = getBitmap();
+            return bitmap != null ? bitmap.getHeight() : 0;
+        }
+
         /** Decode the image once on first use, `null` if it is not decodable. */
         public Bitmap getBitmap() {
             if (bitmap != null || data == null) return bitmap;
@@ -148,22 +164,81 @@ public final class KittyGraphics {
     }
 
 
+    /** A placement of an image at a cell of a screen buffer, drawn over its text and scrolled with it. */
+    public static final class Placement {
+        public final int imageId, placementId;
+        public final TerminalBuffer buffer;
+        /** The row in {@link TerminalBuffer#getScrollCounter()} coordinates, which stays at the same text when it scrolls. */
+        public final long row;
+        public final int column;
+        /** The pixel offset of the image in its first cell. */
+        public final int offsetX, offsetY;
+        /** The stacking order, under the text if negative. */
+        public final int z;
+        /** The rectangle of the image to display, in pixels. */
+        public final int sourceX, sourceY, sourceWidth, sourceHeight;
+        /** The size of the placement in cells. */
+        public final int columns, rows;
+        /** Whether the image is scaled to fit {@link #columns} and {@link #rows}, instead of displayed at its pixel size. */
+        public final boolean scaled;
+
+        Placement(int imageId, int placementId, TerminalBuffer buffer, long row, int column, int offsetX, int offsetY, int z,
+                  int sourceX, int sourceY, int sourceWidth, int sourceHeight, int columns, int rows, boolean scaled) {
+            this.imageId = imageId;
+            this.placementId = placementId;
+            this.buffer = buffer;
+            this.row = row;
+            this.column = column;
+            this.offsetX = offsetX;
+            this.offsetY = offsetY;
+            this.z = z;
+            this.sourceX = sourceX;
+            this.sourceY = sourceY;
+            this.sourceWidth = sourceWidth;
+            this.sourceHeight = sourceHeight;
+            this.columns = columns;
+            this.rows = rows;
+            this.scaled = scaled;
+        }
+    }
+
+
+    private final TerminalEmulator mEmulator;
+
     /** The images by id, oldest first. */
     private final LinkedHashMap<Integer, Image> mImages = new LinkedHashMap<>();
+    /** The placements, drawn in order. */
+    private final List<Placement> mPlacements = new ArrayList<>();
 
     /** The control data of the first chunk of a chunked transmission. */
     private Map<Character, String> mChunkedControl;
     /** The base64 data of the chunks received so far. */
     private StringBuilder mChunkedData;
 
+    KittyGraphics(TerminalEmulator emulator) {
+        mEmulator = emulator;
+    }
+
     public Image getImage(int id) {
         return mImages.get(id);
     }
 
+    public List<Placement> getPlacements() {
+        return mPlacements;
+    }
+
     public void clear() {
         mImages.clear();
+        mPlacements.clear();
         mChunkedControl = null;
         mChunkedData = null;
+    }
+
+    /** Remove the placements on a screen buffer, like when it is cleared. */
+    void clearPlacements(TerminalBuffer buffer) {
+        for (Iterator<Placement> iterator = mPlacements.iterator(); iterator.hasNext(); ) {
+            if (iterator.next().buffer == buffer) iterator.remove();
+        }
     }
 
     /**
@@ -243,16 +318,29 @@ public final class KittyGraphics {
                 Image image = new Image(format, width, height, payload);
                 mImages.put(id, image);
                 evict();
-                return action == 'T' ? place(image, control) : "OK";
+                return action == 'T' ? place(id, image, control) : "OK";
             }
             case 'p': {
                 Image image = mImages.get(id);
-                return image == null ? "ENOENT:no image with this id" : place(image, control);
+                return image == null ? "ENOENT:no image with this id" : place(id, image, control);
             }
             case 'd': {
+                // Lowercase deletes placements, uppercase also frees the images.
                 char what = charValue(control, 'd', 'a');
-                if (what == 'a' || what == 'A') mImages.clear();
-                else if (what == 'i' || what == 'I') mImages.remove(id);
+                int placementId = intValue(control, 'p', 0);
+                if (what == 'a' || what == 'A') {
+                    mPlacements.clear();
+                    for (Image image : mImages.values()) image.placed = false;
+                    if (what == 'A') mImages.clear();
+                } else if (what == 'i' || what == 'I') {
+                    for (Iterator<Placement> iterator = mPlacements.iterator(); iterator.hasNext(); ) {
+                        Placement placement = iterator.next();
+                        if (placement.imageId == id && (placementId == 0 || placement.placementId == placementId)) iterator.remove();
+                    }
+                    Image image = mImages.get(id);
+                    if (image != null && placementId == 0) image.placed = false;
+                    if (what == 'I') mImages.remove(id);
+                }
                 return null;
             }
             default:
@@ -260,11 +348,53 @@ public final class KittyGraphics {
         }
     }
 
-    private static String place(Image image, Map<Character, String> control) {
-        if (intValue(control, 'U', 0) != 1) return "EINVAL:only Unicode placeholder placements (U=1) are supported";
-        image.columns = Math.max(0, intValue(control, 'c', 0));
-        image.rows = Math.max(0, intValue(control, 'r', 0));
-        image.placed = true;
+    private String place(int id, Image image, Map<Character, String> control) {
+        int columns = Math.max(0, intValue(control, 'c', 0));
+        int rows = Math.max(0, intValue(control, 'r', 0));
+        if (intValue(control, 'U', 0) == 1) {
+            image.columns = columns;
+            image.rows = rows;
+            image.placed = true;
+            return "OK";
+        }
+
+        int sourceX = Math.max(0, intValue(control, 'x', 0));
+        int sourceY = Math.max(0, intValue(control, 'y', 0));
+        int width = intValue(control, 'w', 0);
+        int height = intValue(control, 'h', 0);
+        int sourceWidth = Math.min(width > 0 ? width : Integer.MAX_VALUE, image.getWidth() - sourceX);
+        int sourceHeight = Math.min(height > 0 ? height : Integer.MAX_VALUE, image.getHeight() - sourceY);
+        if (sourceWidth <= 0 || sourceHeight <= 0) return "EINVAL:nothing of the image to display";
+
+        int cellWidth = Math.max(1, mEmulator.getCellWidthPixels());
+        int cellHeight = Math.max(1, mEmulator.getCellHeightPixels());
+        int offsetX = Math.max(0, intValue(control, 'X', 0));
+        int offsetY = Math.max(0, intValue(control, 'Y', 0));
+        // A missing size is computed from the other one keeping the aspect ratio, or from the pixel size.
+        if (columns > 0 && rows == 0) rows = (int) Math.ceil((double) columns * cellWidth * sourceHeight / sourceWidth / cellHeight);
+        else if (rows > 0 && columns == 0) columns = (int) Math.ceil((double) rows * cellHeight * sourceWidth / sourceHeight / cellWidth);
+        boolean scaled = columns > 0;
+        if (!scaled) {
+            columns = (offsetX + sourceWidth + cellWidth - 1) / cellWidth;
+            rows = (offsetY + sourceHeight + cellHeight - 1) / cellHeight;
+        }
+
+        TerminalBuffer buffer = mEmulator.getScreen();
+        int placementId = intValue(control, 'p', 0);
+        long scrolledOut = buffer.getScrollCounter() - buffer.getActiveTranscriptRows();
+        for (Iterator<Placement> iterator = mPlacements.iterator(); iterator.hasNext(); ) {
+            Placement placement = iterator.next();
+            // A placement with the same id is moved, and those that left the transcript or lost their image are dropped.
+            if ((placementId != 0 && placement.imageId == id && placement.placementId == placementId) ||
+                (placement.buffer == buffer && placement.row + placement.rows <= scrolledOut) ||
+                !mImages.containsKey(placement.imageId)) {
+                iterator.remove();
+            }
+        }
+        mPlacements.add(new Placement(id, placementId, buffer, mEmulator.getCursorRow() + buffer.getScrollCounter(),
+            mEmulator.getCursorCol(), offsetX, offsetY, intValue(control, 'z', 0),
+            sourceX, sourceY, sourceWidth, sourceHeight, columns, rows, scaled));
+        if (intValue(control, 'C', 0) != 1) mEmulator.moveCursorAfterImage(columns, rows);
         return "OK";
     }
 

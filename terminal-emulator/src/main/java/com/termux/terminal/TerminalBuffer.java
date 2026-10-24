@@ -33,6 +33,8 @@ public final class TerminalBuffer {
     private int mActiveTranscriptRows = 0;
     /** The index in the circular buffer where the visible screen starts. */
     private int mScreenFirstRow = 0;
+    /** The number of times the whole screen has scrolled up, to keep images at the same text. */
+    private long mScrollCounter = 0;
 
 
     /**
@@ -207,6 +209,10 @@ public final class TerminalBuffer {
           return "";
         }
         return text.substring(x1 + 1, x2);
+    }
+
+    public long getScrollCounter() {
+        return mScrollCounter;
     }
 
     public int getActiveTranscriptRows() {
@@ -458,6 +464,7 @@ public final class TerminalBuffer {
 
         // Update the screen location in the ring buffer:
         mScreenFirstRow = (mScreenFirstRow + 1) % mTotalRows;
+        if (topMargin == 0 && bottomMargin == mScreenRows) mScrollCounter++;
         // Note that the history has grown if not already full:
         if (mActiveTranscriptRows < mTotalRows - mScreenRows) mActiveTranscriptRows++;
 
