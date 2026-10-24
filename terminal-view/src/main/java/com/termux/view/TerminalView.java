@@ -142,9 +142,10 @@ public final class TerminalView extends View {
             @Override
             public boolean onUp(MotionEvent event) {
                 mScrollRemainder = 0.0f;
-                if (mEmulator != null && mEmulator.isMouseTrackingActive() && !event.isFromSource(InputDevice.SOURCE_MOUSE) && !isSelectingText() && !scrolledWithFinger) {
+                if (mEmulator != null && mEmulator.isMouseTrackingActive() && !event.isFromSource(InputDevice.SOURCE_MOUSE) && !isSelectingText() && !scrolledWithFinger
+                    && !isLinkAt(event)) {
                     // Quick event processing when mouse tracking is active - do not wait for check of double tapping
-                    // for zooming.
+                    // for zooming. A tap on a hyperlink is left to onSingleTapUp() to open it.
                     sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON, true);
                     sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON, false);
                     return true;
@@ -551,6 +552,11 @@ public final class TerminalView extends View {
             row += mTopRow;
         }
         return new int[] { column, row };
+    }
+
+    private boolean isLinkAt(MotionEvent event) {
+        int[] columnAndRow = getColumnAndRow(event, true);
+        return mEmulator.getScreen().getLinkAt(columnAndRow[1], columnAndRow[0]) != null;
     }
 
     /** Send a single mouse event code to the terminal. */

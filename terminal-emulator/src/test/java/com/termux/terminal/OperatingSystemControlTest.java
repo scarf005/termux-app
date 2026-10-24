@@ -193,4 +193,49 @@ public class OperatingSystemControlTest extends TerminalTestCase {
 		assertEnteringStringGivesResponse("\033]10;?\033\\", "\033]10;rgb:abab/cdcd/0000\033\\");
 	}
 
+	private static final String LINK = "https://example.com/";
+
+	private void assertLinksAre(int row, String... links) {
+		for (int column = 0; column < links.length; column++)
+			assertEquals("row " + row + ", column " + column, links[column], mTerminal.getScreen().getLinkAt(row, column));
+	}
+
+	public void testHyperlink() {
+		// What Claude Code writes for a markdown link, as zellij passes it on.
+		withTerminalSized(8, 2).enterString("a \033]8;id=1;" + LINK + "\033\\link\033]8;;\033\\ b");
+		assertLinesAre("a link b", "        ");
+		assertLinksAre(0, null, null, LINK, LINK, LINK, LINK, null, null);
+		// A tap outside the text.
+		assertNull(mTerminal.getScreen().getLinkAt(0, 8));
+		assertNull(mTerminal.getScreen().getLinkAt(-1, 2));
+		assertNull(mTerminal.getScreen().getLinkAt(2, 2));
+		enterString("\033]8;;" + LINK + "\007c");
+		assertLinksAre(1, LINK, null);
+		enterString("\033cd").assertLinesAre("d       ", "        ");
+		assertLinksAre(0, (String) null);
+	}
+
+	public void testHyperlinkOnWideCharsWrappedToTheNextRow() {
+		withTerminalSized(4, 2).enterString("\033]8;;" + LINK + "\007a한글\033]8;;\007");
+		assertLinesAre("a한 ", "글  ");
+		assertLinksAre(0, LINK, LINK, LINK, null);
+		assertLinksAre(1, LINK, LINK, null, null);
+	}
+
+	public void testOverwritingErasingAndInsertingMovesHyperlink() {
+		withTerminalSized(5, 2).enterString("\033]8;;" + LINK + "\007abcd\033]8;;\007");
+		enterString("\033[1;1Hx\033[1;4H\033[K");
+		assertLinksAre(0, null, LINK, LINK, null, null);
+		enterString("\033[1;1H\033[2@");
+		assertLinesAre("  xbc", "     ");
+		assertLinksAre(0, null, null, null, LINK, LINK);
+	}
+
+	public void testHyperlinkKeptWhenResizing() {
+		withTerminalSized(4, 3).enterString("\033]8;;" + LINK + "\007abcd\033]8;;\007");
+		resize(2, 3).assertLinesAre("ab", "cd", "  ");
+		assertLinksAre(0, LINK, LINK);
+		assertLinksAre(1, LINK, LINK);
+	}
+
 }

@@ -394,6 +394,7 @@ public final class TerminalBuffer {
                     setChar(outputColumn, currentOutputExternalRow, codePoint, styleAtCol);
 
                     if (displayWidth > 0) {
+                        setLink(outputColumn, currentOutputExternalRow, displayWidth, oldLine.getLink(currentOldCol));
                         if (oldCursorRow == externalOldRow && oldCursorColumn == currentOldCol) {
                             newCursorColumn = currentOutputExternalColumn;
                             newCursorRow = currentOutputExternalRow;
@@ -533,6 +534,17 @@ public final class TerminalBuffer {
             throw new IllegalArgumentException("TerminalBuffer.setChar(): row=" + row + ", column=" + column + ", mScreenRows=" + mScreenRows + ", mColumns=" + mColumns);
         row = externalToInternalRow(row);
         allocateFullLineIfNecessary(row).setChar(column, codePoint, style);
+    }
+
+    public void setLink(int column, int row, int width, String link) {
+        allocateFullLineIfNecessary(externalToInternalRow(row)).setLink(column, width, link);
+    }
+
+    /** The OSC 8 hyperlink of a cell, or null, also for a cell outside the screen and transcript. */
+    public String getLinkAt(int externalRow, int column) {
+        if (column < 0 || column >= mColumns || externalRow < -mActiveTranscriptRows || externalRow >= mScreenRows) return null;
+        TerminalRow row = mLines[externalToInternalRow(externalRow)];
+        return row == null ? null : row.getLink(column);
     }
 
     public long getStyleAt(int externalRow, int column) {

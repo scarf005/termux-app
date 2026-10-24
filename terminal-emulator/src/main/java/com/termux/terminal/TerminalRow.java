@@ -51,6 +51,8 @@ public final class TerminalRow {
     boolean mHasNonOneWidthOrSurrogateChars;
     /** If this row has a {@link TerminalBitmap}. Used for performance only. */
     public boolean mHasTerminalBitmap;
+    /** The OSC 8 hyperlink of each cell, or null if the row has none. */
+    private String[] mLinks;
 
     /** Construct a blank row (containing only whitespace, ' ') with a specified style. */
     public TerminalRow(int columns, long style) {
@@ -67,6 +69,7 @@ public final class TerminalRow {
         final int x2 = line.findStartOfColumn(sourceX2);
         boolean startingFromSecondHalfOfWideChar = (sourceX1 > 0 && line.wideDisplayCharacterStartingAt(sourceX1 - 1));
         final char[] sourceChars = (this == line) ? Arrays.copyOf(line.mText, line.mText.length) : line.mText;
+        final String[] sourceLinks = (this == line && mLinks != null) ? mLinks.clone() : line.mLinks;
         int latestNonCombiningWidth = 0;
         for (int i = x1; i < x2; i++) {
             char sourceChar = sourceChars[i];
@@ -83,6 +86,7 @@ public final class TerminalRow {
                 latestNonCombiningWidth = w;
             }
             setChar(destinationX, codePoint, line.getStyle(sourceX1));
+            if (w > 0) setLink(destinationX, w, sourceLinks == null ? null : sourceLinks[sourceX1]);
         }
     }
 
@@ -149,6 +153,7 @@ public final class TerminalRow {
         mSpaceUsed = mColumns;
         mHasNonOneWidthOrSurrogateChars = false;
         mHasTerminalBitmap = false;
+        mLinks = null;
     }
 
     // https://github.com/steven676/Android-Terminal-Emulator/commit/9a47042620bec87617f0b4f5d50568535668fe26
@@ -163,6 +168,7 @@ public final class TerminalRow {
         }
 
         final int newCodePointDisplayWidth = WcWidth.width(codePoint);
+        if (newCodePointDisplayWidth > 0) setLink(columnToSet, newCodePointDisplayWidth, null);
 
         // Fast path when we don't have any chars with width != 1
         if (!mHasNonOneWidthOrSurrogateChars) {
@@ -285,6 +291,19 @@ public final class TerminalRow {
 
     public final long getStyle(int column) {
         return mStyle[column];
+    }
+
+    public String getLink(int column) {
+        return mLinks == null ? null : mLinks[column];
+    }
+
+    /** Set the hyperlink of the cells of a character, which is cleared by writing another character over it. */
+    public void setLink(int column, int width, String link) {
+        if (mLinks == null) {
+            if (link == null) return;
+            mLinks = new String[mColumns];
+        }
+        Arrays.fill(mLinks, column, Math.min(column + width, mColumns), link);
     }
 
 }

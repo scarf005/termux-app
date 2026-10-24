@@ -354,6 +354,9 @@ public final class TerminalEmulator {
     /** The kitty graphics protocol images. */
     private final KittyGraphics mKittyGraphics = new KittyGraphics(this);
 
+    /** The OSC 8 hyperlink of the text being written, or null. */
+    private String mHyperlink;
+
 
 
     /**
@@ -2836,6 +2839,11 @@ public final class TerminalEmulator {
                     if (endOfInput) break;
                 }
                 break;
+            case 8: { // Hyperlink: "8 ; params ; URI" starts a link for the following text, and an empty URI ends it.
+                int uriStart = textParameter.indexOf(';') + 1;
+                mHyperlink = (uriStart == 0 || uriStart == textParameter.length()) ? null : textParameter.substring(uriStart);
+                break;
+            }
             case 10: // Set foreground color.
             case 11: // Set background color.
             case 12: // Set cursor color.
@@ -3447,6 +3455,7 @@ public final class TerminalEmulator {
         // TODO: Check if there are thread synchronization issues with mCursorCol and mCursorRow, possibly causing others bugs too.
         if (column < 0) column = 0;
         mScreen.setChar(column, mCursorRow, codePoint, getStyle());
+        if (mHyperlink != null && displayWidth > 0) mScreen.setLink(column, mCursorRow, displayWidth, mHyperlink);
 
         if (autoWrap && displayWidth > 0)
             mAboutToAutoWrap = (mCursorCol == mRightMargin - displayWidth);
@@ -3510,6 +3519,7 @@ public final class TerminalEmulator {
         mContinueSequence = false;
         mEscapeState = ESC_NONE;
         mInsertMode = false;
+        mHyperlink = null;
         mTopMargin = mLeftMargin = 0;
         mBottomMargin = mRows;
         mRightMargin = mColumns;
